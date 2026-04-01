@@ -11,9 +11,9 @@ from ..models import ActivityState, Session, SessionStatus
 
 # Activity indicators (terminal-safe characters)
 _ACTIVITY_ICONS = {
-    ActivityState.WORKING: "[bold green]>>>[/]",   # active work
-    ActivityState.WAITING: "[yellow]...[/]",        # waiting for input
-    ActivityState.IDLE:    "[dim]zzz[/]",           # idle
+    ActivityState.WORKING: "[bold green]>>>[/]",
+    ActivityState.WAITING: "[yellow]...[/]",
+    ActivityState.IDLE:    "[dim]zzz[/]",
     ActivityState.UNKNOWN: "[dim]?[/]",
 }
 
@@ -22,7 +22,7 @@ class SessionTable(DataTable):
     """DataTable showing tracked terminal sessions with live status."""
 
     def on_mount(self):
-        self.add_columns("PID", "Label", "Shell", "Dir", "Title", "Uptime", "Mem", "Activity")
+        self.add_columns("PID", "Label", "Shell", "Dir", "Uptime", "Mem", "Activity", "Summary")
         self.cursor_type = "row"
 
     def refresh_sessions(self, sessions: list[Session]):
@@ -40,18 +40,31 @@ class SessionTable(DataTable):
 
             if session.status == SessionStatus.DEAD:
                 activity = "[red]DEAD[/]"
+            elif session.analysis and session.analysis.has_errors:
+                activity = "[bold red]ERR[/]"
             else:
                 activity = _ACTIVITY_ICONS.get(session.activity, "?")
+
+            # Build summary from analysis or window title
+            summary = ""
+            if session.analysis and session.analysis.summary:
+                tool = session.analysis.detected_tool
+                summary = f"[{tool}] " if tool else ""
+                summary += session.analysis.summary
+                if session.analysis.waiting_on_user:
+                    summary += " [yellow](input)[/]"
+            elif session.window_title:
+                summary = _truncate(session.window_title, 35)
 
             self.add_row(
                 str(session.pid),
                 session.label or "\u2014",
                 session.shell_type.value,
-                _truncate(session.working_dir, 20),
-                _truncate(session.window_title, 25) if session.window_title else "\u2014",
+                _truncate(session.working_dir, 18),
                 uptime,
                 f"{session.memory_mb:.0f}MB" if session.memory_mb else "\u2014",
                 activity,
+                _truncate(summary, 40) if summary else "\u2014",
                 key=str(session.pid),
             )
 
