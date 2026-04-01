@@ -1,0 +1,19 @@
+[project]
+name = "termdash"
+version = "0.1.0"
+description = "Native terminal manager with Textual TUI"
+requires-python = ">=3.10"
+dependencies = [
+    "textual>=0.40.0",
+    "psutil>=5.9.0",
+]
+
+[project.optional-dependencies]
+windows = ["pywin32>=306"]
+
+[project.scripts]
+termdash = "termdash.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"

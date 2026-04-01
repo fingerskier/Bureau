@@ -6,3 +6,4 @@ A terminal wrangling dashboard
 * Spawn terminals and track and manage them via PIDs
 * Adjust and remember terminal window arrangements
 * Remember "Favorite" terminals and group them
+* Runs on Windows, macOS, and Raspberry Pi OS
