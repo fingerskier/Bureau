@@ -45,6 +45,19 @@ class ActivityState(str, Enum):
 
 
 @dataclass
+class TerminalAnalysis:
+    """Structured output from Claude Haiku terminal analysis."""
+    state: str = "unknown"           # idle|working|error|blocked
+    waiting_on_user: bool = False
+    summary: str = ""
+    detected_tool: str | None = None
+    suggestions: list[str] = field(default_factory=list)
+    has_errors: bool = False
+    confidence: float = 0.0
+    analyzed_at: Optional[datetime] = None
+
+
+@dataclass
 class Favorite:
     id: Optional[int] = None
     label: str = ""
@@ -120,3 +133,8 @@ class Session:
     window_title: str = ""
     activity: ActivityState = ActivityState.UNKNOWN
     _cpu_history: list[float] = field(default_factory=list, repr=False)
+    screen_content: str = ""
+    visually_idle: bool = False
+    analysis: Optional[TerminalAnalysis] = None
+    _screen_hash: str = field(default="", repr=False)
+    _screen_idle_count: int = field(default=0, repr=False)
