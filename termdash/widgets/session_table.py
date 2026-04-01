@@ -26,7 +26,9 @@ class SessionTable(DataTable):
         self.cursor_type = "row"
 
     def refresh_sessions(self, sessions: list[Session]):
-        """Clear and repopulate the table from a list of sessions."""
+        """Clear and repopulate the table, preserving cursor position."""
+        # Remember selected PID before clearing
+        selected_pid = self.get_selected_pid()
         self.clear()
         for session in sessions:
             uptime = ""
@@ -68,11 +70,26 @@ class SessionTable(DataTable):
                 key=str(session.pid),
             )
 
+        # Restore cursor to previously selected PID
+        if selected_pid is not None:
+            pid_str = str(selected_pid)
+            for idx in range(self.row_count):
+                try:
+                    row = self.get_row_at(idx)
+                    if row[0] == pid_str:
+                        self.move_cursor(row=idx)
+                        break
+                except Exception:
+                    break
+
     def get_selected_pid(self) -> int | None:
         """Return the PID of the currently selected row, or None."""
-        if self.cursor_row is not None:
-            row = self.get_row_at(self.cursor_row)
-            return int(row[0])
+        if self.cursor_row is not None and self.row_count > 0:
+            try:
+                row = self.get_row_at(self.cursor_row)
+                return int(row[0])
+            except Exception:
+                return None
         return None
 
 

@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(title Bureau:*)",
+      "Bash(pip install:*)",
+      "Bash(python -m pip install -e .)",
+      "Bash(python -c \"from termdash.models import ShellType, Session; from termdash.db import Database; from termdash.manager import Manager; from termdash.platform import get_driver; from termdash.widgets import SpawnDialog, SessionTable, GroupBrowser; print\\('All imports OK'\\); d = get_driver\\(\\); print\\(f'Platform driver: {type\\(d\\).__name__}'\\)\")",
+      "Bash(python -c \"from termdash.__main__ import main; print\\('Entry point OK'\\)\")",
+      "Bash(python -c \"from termdash.app import TermDashApp; from termdash.widgets import InjectDialog; from termdash.manager import Manager; print\\('Phase 2 imports OK'\\)\")",
+      "Bash(python -c \"from termdash.models import ActivityState; from termdash.manager import Manager; from termdash.widgets.session_table import SessionTable; print\\('Phase 3 imports OK'\\)\")",
+      "Bash(python -c \"from termdash.app import TermDashApp; from termdash.widgets import GroupPickerDialog; print\\('Phase 4 imports OK'\\)\")",
+      "Bash(python -m pip install pywin32)",
+      "Bash(python -c \"from termdash.platform.windows import WindowsDriver, _ensure_win32; w = _ensure_win32\\(\\); print\\(f'win32 loaded: {w is not None}'\\)\")",
+      "Bash(python:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
+    ]
+  }
+}

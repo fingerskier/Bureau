@@ -207,13 +207,21 @@ class TermDashApp(App):
 
     def _do_save_favorite(self, session, name: str | None):
         if name:
+            # Glean the actual cwd from the live process (may differ from spawn dir)
+            import psutil
+            cwd = session.working_dir
+            try:
+                proc = psutil.Process(session.pid)
+                cwd = proc.cwd() or cwd
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
             fav = Favorite(
                 label=name,
                 shell_type=session.shell_type,
-                working_dir=session.working_dir,
+                working_dir=cwd,
             )
             self.database.upsert_favorite(fav)
-            self._set_status(f"Saved favorite: {name}")
+            self._set_status(f"Saved favorite: {name} ({cwd})")
             self._refresh_sidebar()
 
     def action_launch_group(self):

@@ -73,6 +73,7 @@ class Manager:
         if pid in self.sessions:
             self.sessions[pid].status = SessionStatus.DEAD
             self.db.save_session(self.sessions[pid])
+            del self.sessions[pid]
         return success
 
     # --- Health ---
@@ -133,6 +134,10 @@ class Manager:
                         session._screen_idle_count = 0
                     session._screen_hash = new_hash
                     session.visually_idle = session._screen_idle_count >= 3
+
+        # Remove dead sessions from tracking
+        for pid in dead_pids:
+            del self.sessions[pid]
 
     def _classify_activity(self, session: Session) -> ActivityState:
         """Classify activity using analysis > screen hash > CPU heuristic."""

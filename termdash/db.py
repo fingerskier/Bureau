@@ -93,11 +93,22 @@ class Database:
                 (fav.label, fav.shell_type.value, fav.working_dir, fav.commands_json(), fav.id),
             )
         else:
-            cur = self.conn.execute(
-                "INSERT INTO favorites (label, shell_type, working_dir, startup_commands) VALUES (?,?,?,?)",
-                (fav.label, fav.shell_type.value, fav.working_dir, fav.commands_json()),
-            )
-            fav.id = cur.lastrowid
+            # Check for existing favorite with same label — update instead of duplicate
+            existing = self.conn.execute(
+                "SELECT id FROM favorites WHERE label=?", (fav.label,)
+            ).fetchone()
+            if existing:
+                fav.id = existing["id"]
+                self.conn.execute(
+                    "UPDATE favorites SET shell_type=?, working_dir=?, startup_commands=? WHERE id=?",
+                    (fav.shell_type.value, fav.working_dir, fav.commands_json(), fav.id),
+                )
+            else:
+                cur = self.conn.execute(
+                    "INSERT INTO favorites (label, shell_type, working_dir, startup_commands) VALUES (?,?,?,?)",
+                    (fav.label, fav.shell_type.value, fav.working_dir, fav.commands_json()),
+                )
+                fav.id = cur.lastrowid
         self.conn.commit()
         return fav
 
