@@ -72,3 +72,7 @@ class TerminalDriver(ABC):
     def inject_text(self, window_handle: int, text: str) -> bool:
         """Send text/keystrokes to a terminal window. Optional — defaults to no-op."""
         return False
+
+    def read_screen(self, window_handle: int, pid: int, lines: int = 50) -> str | None:
+        """Read visible text from a terminal window. Optional — defaults to None."""
+        return None

@@ -12,23 +12,30 @@ import psutil
 from ..models import ShellType, WindowRect
 from .base import TerminalDriver
 
-# Lazy imports for win32 — only available on Windows
+# Lazy imports for win32 — only available when pywin32 is installed
 _win32 = None
+_win32_available = True
 
 
 def _ensure_win32():
-    global _win32
+    global _win32, _win32_available
     if _win32 is None:
-        import ctypes
-        import win32con
-        import win32gui
-        import win32process
-        _win32 = type("Win32", (), {
-            "gui": win32gui,
-            "process": win32process,
-            "con": win32con,
-            "ctypes": ctypes,
-        })()
+        if not _win32_available:
+            return None
+        try:
+            import ctypes
+            import win32con
+            import win32gui
+            import win32process
+            _win32 = type("Win32", (), {
+                "gui": win32gui,
+                "process": win32process,
+                "con": win32con,
+                "ctypes": ctypes,
+            })()
+        except ImportError:
+            _win32_available = False
+            return None
     return _win32
 
 
@@ -83,8 +90,8 @@ class WindowsDriver(TerminalDriver):
         hwnd = self.find_window_for_pid(proc.pid)
 
         # Set the window title if we got a handle
-        if hwnd and title:
-            w = _ensure_win32()
+        w = _ensure_win32()
+        if hwnd and title and w:
             w.gui.SetWindowText(hwnd, title)
 
         return proc.pid, hwnd
@@ -111,6 +118,8 @@ class WindowsDriver(TerminalDriver):
 
     def get_window_rect(self, window_handle: int) -> Optional[WindowRect]:
         w = _ensure_win32()
+        if not w:
+            return None
         try:
             left, top, right, bottom = w.gui.GetWindowRect(window_handle)
             placement = w.gui.GetWindowPlacement(window_handle)
@@ -126,6 +135,8 @@ class WindowsDriver(TerminalDriver):
 
     def set_window_rect(self, window_handle: int, rect: WindowRect) -> bool:
         w = _ensure_win32()
+        if not w:
+            return False
         try:
             if rect.maximized:
                 w.gui.ShowWindow(window_handle, w.con.SW_MAXIMIZE)
@@ -140,6 +151,8 @@ class WindowsDriver(TerminalDriver):
 
     def focus_window(self, window_handle: int) -> bool:
         w = _ensure_win32()
+        if not w:
+            return False
         try:
             w.gui.ShowWindow(window_handle, w.con.SW_RESTORE)
             w.gui.SetForegroundWindow(window_handle)
@@ -149,6 +162,8 @@ class WindowsDriver(TerminalDriver):
 
     def minimize_window(self, window_handle: int) -> bool:
         w = _ensure_win32()
+        if not w:
+            return False
         try:
             w.gui.ShowWindow(window_handle, w.con.SW_MINIMIZE)
             return True
@@ -157,6 +172,8 @@ class WindowsDriver(TerminalDriver):
 
     def restore_window(self, window_handle: int) -> bool:
         w = _ensure_win32()
+        if not w:
+            return False
         try:
             w.gui.ShowWindow(window_handle, w.con.SW_RESTORE)
             return True
@@ -165,6 +182,8 @@ class WindowsDriver(TerminalDriver):
 
     def get_window_title(self, window_handle: int) -> str:
         w = _ensure_win32()
+        if not w:
+            return ""
         try:
             return w.gui.GetWindowText(window_handle)
         except Exception:
@@ -173,6 +192,8 @@ class WindowsDriver(TerminalDriver):
     def find_window_for_pid(self, pid: int) -> Optional[int]:
         """Enumerate windows to find one owned by this PID."""
         w = _ensure_win32()
+        if not w:
+            return None
         result = [None]
 
         def _enum_callback(hwnd, _):
@@ -195,6 +216,12 @@ class WindowsDriver(TerminalDriver):
 
     def get_screen_size(self) -> tuple[int, int]:
         w = _ensure_win32()
+        if not w:
+            import ctypes
+            return (
+                ctypes.windll.user32.GetSystemMetrics(0),
+                ctypes.windll.user32.GetSystemMetrics(1),
+            )
         return (
             w.ctypes.windll.user32.GetSystemMetrics(0),
             w.ctypes.windll.user32.GetSystemMetrics(1),
@@ -203,15 +230,77 @@ class WindowsDriver(TerminalDriver):
     def inject_text(self, window_handle: int, text: str) -> bool:
         """Send keystrokes to a terminal window via WM_CHAR messages."""
         w = _ensure_win32()
+        if not w:
+            return False
         WM_CHAR = 0x0102
         try:
-            # Bring window to foreground first
             self.focus_window(window_handle)
             time.sleep(0.1)
             for char in text:
                 w.gui.PostMessage(window_handle, WM_CHAR, ord(char), 0)
-            # Send Enter
             w.gui.PostMessage(window_handle, WM_CHAR, ord("\r"), 0)
             return True
         except Exception:
             return False
+
+    def read_screen(self, window_handle: int, pid: int, lines: int = 50) -> str | None:
+        """Read the console screen buffer of a terminal process via ctypes."""
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.windll.kernel32
+        STD_OUTPUT_HANDLE = -11
+
+        # Save our own console state, then attach to target
+        had_console = kernel32.FreeConsole()
+        if not kernel32.AttachConsole(pid):
+            # Re-attach to our own console
+            if had_console:
+                kernel32.AttachConsole(-1)  # ATTACH_PARENT_PROCESS
+            return None
+
+        try:
+            handle = kernel32.GetStdHandle(STD_OUTPUT_HANDLE)
+            if handle == -1:
+                return None
+
+            class CONSOLE_SCREEN_BUFFER_INFO(ctypes.Structure):
+                _fields_ = [
+                    ("dwSize", wintypes._COORD),
+                    ("dwCursorPosition", wintypes._COORD),
+                    ("wAttributes", wintypes.WORD),
+                    ("srWindow", wintypes.SMALL_RECT),
+                    ("dwMaximumWindowSize", wintypes._COORD),
+                ]
+
+            csbi = CONSOLE_SCREEN_BUFFER_INFO()
+            if not kernel32.GetConsoleScreenBufferInfo(handle, ctypes.byref(csbi)):
+                return None
+
+            width = csbi.dwSize.X
+            # Read from cursor position backwards, up to `lines` lines
+            end_row = csbi.dwCursorPosition.Y
+            start_row = max(0, end_row - lines + 1)
+            total_chars = width * (end_row - start_row + 1)
+
+            buf = ctypes.create_unicode_buffer(total_chars)
+            coord = wintypes._COORD(0, start_row)
+            chars_read = wintypes.DWORD()
+            kernel32.ReadConsoleOutputCharacterW(
+                handle, buf, total_chars, coord, ctypes.byref(chars_read)
+            )
+
+            # Split into lines and strip trailing whitespace
+            raw = buf.value
+            result_lines = []
+            for i in range(end_row - start_row + 1):
+                line = raw[i * width:(i + 1) * width].rstrip()
+                result_lines.append(line)
+
+            return "\n".join(result_lines)
+        except Exception:
+            return None
+        finally:
+            kernel32.FreeConsole()
+            # Re-attach to parent console (Textual manages its own I/O)
+            kernel32.AttachConsole(-1)
