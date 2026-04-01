@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import hashlib
 from typing import Optional
 
 import psutil
@@ -10,9 +11,10 @@ import psutil
 from .db import Database
 from .models import (
     ActivityState, Favorite, Group, Layout, LayoutWindow,
-    Session, SessionStatus, WindowRect,
+    Session, SessionStatus, TerminalAnalysis, WindowRect,
 )
 from .platform.base import TerminalDriver
+from .analyzer import analyze_screen
 
 
 class Manager:
@@ -104,7 +106,7 @@ class Manager:
             session._cpu_history.append(session.cpu_percent)
             if len(session._cpu_history) > self._CPU_HISTORY_LEN:
                 session._cpu_history = session._cpu_history[-self._CPU_HISTORY_LEN:]
-            session.activity = self._classify_activity(session._cpu_history)
+            session.activity = self._classify_activity(session)
 
             # Refresh window handle if lost
             if session.window_handle is None:
@@ -117,8 +119,43 @@ class Manager:
             if session.window_handle:
                 session.window_title = self.driver.get_window_title(session.window_handle)
 
-    def _classify_activity(self, cpu_history: list[float]) -> ActivityState:
-        """Classify activity based on recent CPU usage samples."""
+            # Capture screen content and hash for visual idle detection
+            if session.window_handle:
+                content = self.driver.read_screen(session.window_handle, pid)
+                if content:
+                    session.screen_content = content
+                    # Hash last ~20 lines for staleness detection
+                    tail = "\n".join(content.splitlines()[-20:])
+                    new_hash = hashlib.md5(tail.encode()).hexdigest()
+                    if new_hash == session._screen_hash:
+                        session._screen_idle_count += 1
+                    else:
+                        session._screen_idle_count = 0
+                    session._screen_hash = new_hash
+                    session.visually_idle = session._screen_idle_count >= 3
+
+    def _classify_activity(self, session: Session) -> ActivityState:
+        """Classify activity using analysis > screen hash > CPU heuristic."""
+        # Priority 1: Haiku analysis (if fresh, < 10s old)
+        if session.analysis and session.analysis.analyzed_at:
+            age = (datetime.now() - session.analysis.analyzed_at).total_seconds()
+            if age < 10:
+                state_map = {
+                    "working": ActivityState.WORKING,
+                    "idle": ActivityState.IDLE,
+                    "error": ActivityState.WORKING,  # errors are active state
+                    "blocked": ActivityState.WAITING,
+                }
+                return state_map.get(session.analysis.state, ActivityState.UNKNOWN)
+
+        # Priority 2: Screen hash — if visually idle AND CPU idle
+        if session.visually_idle:
+            cpu_history = session._cpu_history
+            if cpu_history and all(c < self._CPU_IDLE_THRESHOLD for c in cpu_history[-3:]):
+                return ActivityState.IDLE
+
+        # Priority 3: CPU heuristic (existing logic)
+        cpu_history = session._cpu_history
         if not cpu_history:
             return ActivityState.UNKNOWN
         recent = cpu_history[-3:] if len(cpu_history) >= 3 else cpu_history
@@ -134,6 +171,15 @@ class Manager:
 
     def get_all_sessions(self) -> list[Session]:
         return list(self.sessions.values())
+
+    def analyze_sessions(self):
+        """Run Claude Haiku analysis on sessions with fresh screen content."""
+        for session in self.get_live_sessions():
+            if session.visually_idle or not session.screen_content:
+                continue
+            result = analyze_screen(session.screen_content)
+            if result:
+                session.analysis = result
 
     # --- Reconnection ---
 
