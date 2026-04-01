@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import subprocess
+import tempfile
+from pathlib import Path
 from typing import Optional
 
 import psutil
@@ -13,6 +15,9 @@ from .base import TerminalDriver
 
 class LinuxDriver(TerminalDriver):
     """Basic Linux driver using subprocess and xdotool/wmctrl when available."""
+
+    _log_dir: Path = Path(tempfile.gettempdir()) / "termdash_logs"
+    _pid_logs: dict[int, Path] = {}  # pid -> log file path
 
     SHELL_MAP: dict[ShellType, list[str]] = {
         ShellType.BASH: ["/bin/bash"],
@@ -29,7 +34,8 @@ class LinuxDriver(TerminalDriver):
         startup_commands: list[str] | None = None,
         title: str = "",
     ) -> tuple[int, Optional[int]]:
-        # Try common terminal emulators in order of preference
+        self._log_dir.mkdir(parents=True, exist_ok=True)
+
         terminal_cmds = [
             ["gnome-terminal", "--"],
             ["konsole", "-e"],
@@ -39,20 +45,31 @@ class LinuxDriver(TerminalDriver):
         shell = self.shell_executable(shell_type)
         cwd = working_dir or None
 
+        # Create a log file for output capture
+        log_file = self._log_dir / f"termdash_{id(self)}_{len(self._pid_logs)}.log"
+        log_file.touch()
+
+        # Wrap shell command in `script` for output capture
+        if startup_commands:
+            chain = " && ".join(startup_commands)
+            script_cmd = shell + ["-c", f"{chain} ; exec $SHELL"]
+        else:
+            script_cmd = shell
+
+        wrapped = ["script", "-qf", str(log_file)] + script_cmd
+
         for term_cmd in terminal_cmds:
             try:
-                cmd = term_cmd + shell
-                if startup_commands:
-                    chain = " && ".join(startup_commands)
-                    cmd = term_cmd + shell + ["-c", f"{chain} ; exec $SHELL"]
-
+                cmd = term_cmd + wrapped
                 proc = subprocess.Popen(cmd, cwd=cwd)
+                self._pid_logs[proc.pid] = log_file
                 return proc.pid, None
             except FileNotFoundError:
                 continue
 
-        # Fallback: bare shell (no terminal emulator window)
-        proc = subprocess.Popen(shell, cwd=cwd)
+        # Fallback: bare shell with script wrapper
+        proc = subprocess.Popen(wrapped, cwd=cwd)
+        self._pid_logs[proc.pid] = log_file
         return proc.pid, None
 
     def is_alive(self, pid: int) -> bool:
@@ -169,3 +186,16 @@ class LinuxDriver(TerminalDriver):
             return True
         except (FileNotFoundError, subprocess.TimeoutExpired):
             return False
+
+    def read_screen(self, window_handle: int, pid: int, lines: int = 50) -> str | None:
+        """Read terminal output from script log file."""
+        log_file = self._pid_logs.get(pid)
+        if not log_file or not log_file.exists():
+            return None
+        try:
+            # Read last N lines from the log file
+            content = log_file.read_text(errors="replace")
+            all_lines = content.splitlines()
+            return "\n".join(all_lines[-lines:])
+        except Exception:
+            return None
