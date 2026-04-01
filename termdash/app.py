@@ -62,16 +62,17 @@ class TermDashApp(App):
     """
 
     BINDINGS = [
-        Binding("n", "spawn", "New Terminal"),
-        Binding("k", "kill", "Kill Selected"),
-        Binding("f", "focus_term", "Focus Window"),
-        Binding("s", "save_favorite", "Save Favorite"),
-        Binding("g", "launch_group", "Launch Group"),
-        Binding("i", "inject", "Inject Text"),
-        Binding("c", "capture_layout", "Capture Layout"),
-        Binding("slash", "filter", "Filter"),
-        Binding("r", "refresh", "Refresh"),
-        Binding("q", "quit", "Quit"),
+        Binding("ctrl+n", "spawn", "New Terminal", priority=True),
+        Binding("ctrl+k", "kill", "Kill Selected", priority=True),
+        Binding("ctrl+f", "focus_term", "Focus Window", priority=True),
+        Binding("ctrl+s", "save_favorite", "Save Favorite", priority=True),
+        Binding("ctrl+g", "launch_group", "Launch Group", priority=True),
+        Binding("ctrl+i", "inject", "Inject Text", priority=True),
+        Binding("ctrl+l", "capture_layout", "Capture Layout", priority=True),
+        Binding("slash", "filter", "Filter", priority=True),
+        Binding("escape", "unfocus_filter", "Back to Table", priority=False),
+        Binding("ctrl+r", "refresh", "Refresh", priority=True),
+        Binding("ctrl+q", "quit", "Quit", priority=True),
     ]
 
     session_count: reactive[int] = reactive(0)
@@ -83,6 +84,7 @@ class TermDashApp(App):
         self.platform_driver = get_driver()
         self.manager = Manager(self.database, self.platform_driver)
         self._poll_timer: Timer | None = None
+        self._analysis_timer: Timer | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -100,7 +102,10 @@ class TermDashApp(App):
         self._set_status(f"Reconnected {reconnected} session(s)")
         self._refresh_sidebar()
         self._poll_timer = self.set_interval(2.0, self._poll_sessions)
+        self._analysis_timer = self.set_interval(5.0, self._analyze_sessions)
         self._refresh_table()
+        # Focus the session table so keybindings work immediately
+        self.query_one("#session-table", SessionTable).focus()
 
     def _set_status(self, msg: str):
         self.query_one("#status-bar", Static).update(msg)
@@ -114,6 +119,9 @@ class TermDashApp(App):
 
     def action_filter(self):
         self.query_one("#filter-input", Input).focus()
+
+    def action_unfocus_filter(self):
+        self.query_one("#session-table", SessionTable).focus()
 
     # -- Table --
 
@@ -139,6 +147,14 @@ class TermDashApp(App):
 
     def _poll_sessions(self):
         self._refresh_table()
+
+    def _analyze_sessions(self):
+        """Run Claude Haiku analysis on active sessions (background)."""
+        self.run_worker(self._run_analysis, thread=True)
+
+    def _run_analysis(self):
+        """Worker thread for Haiku analysis (subprocess calls block)."""
+        self.manager.analyze_sessions()
 
     # -- Sidebar --
 
@@ -323,4 +339,6 @@ class TermDashApp(App):
     def on_unmount(self):
         if self._poll_timer:
             self._poll_timer.stop()
+        if self._analysis_timer:
+            self._analysis_timer.stop()
         self.database.close()
