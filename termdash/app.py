@@ -27,6 +27,8 @@ from .widgets import (
 class TermDashApp(App):
     """Terminal Dashboard."""
 
+    COMMANDS = App.COMMANDS | {TermDashCommands}
+
     TITLE = "TermDash"
     SUB_TITLE = "Terminal Manager"
 
