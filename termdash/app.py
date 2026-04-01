@@ -13,13 +13,14 @@ from textual.reactive import reactive
 from textual.timer import Timer
 from textual.widgets import Footer, Header, Input, Static
 
+from .commands import TermDashCommands
 from .db import Database
 from .manager import Manager
 from .models import Favorite, SessionStatus
 from .platform import get_driver
 from .widgets import (
-    GroupBrowser, GroupPickerDialog, InjectDialog,
-    SaveFavoriteDialog, SessionTable, SpawnDialog,
+    AddToGroupDialog, CreateGroupDialog, GroupBrowser, GroupPickerDialog,
+    InjectDialog, SaveFavoriteDialog, SessionTable, SpawnDialog,
 )
 
 
@@ -67,7 +68,10 @@ class TermDashApp(App):
         Binding("ctrl+f", "focus_term", "Focus Window", priority=True),
         Binding("ctrl+s", "save_favorite", "Save Favorite", priority=True),
         Binding("ctrl+g", "launch_group", "Launch Group", priority=True),
+        Binding("ctrl+t", "create_group", "Create Group", priority=True),
+        Binding("ctrl+a", "add_to_group", "Add to Group", priority=True),
         Binding("ctrl+i", "inject", "Inject Text", priority=True),
+        Binding("ctrl+d", "delete_favorite", "Delete Favorite", priority=True),
         Binding("ctrl+l", "capture_layout", "Capture Layout", priority=True),
         Binding("slash", "filter", "Filter", priority=True),
         Binding("escape", "unfocus_filter", "Back to Table", priority=False),
@@ -330,6 +334,60 @@ class TermDashApp(App):
                 self.database.set_group_favorites(group.id, fav_ids)
         self._refresh_sidebar()
         self._set_status(f"Imported config from {path}")
+
+    def action_delete_favorite(self):
+        browser = self.query_one("#sidebar", GroupBrowser)
+        browser.request_delete_selected()
+
+    def on_group_browser_favorite_delete_requested(self, event: GroupBrowser.FavoriteDeleteRequested):
+        favs = self.database.list_favorites()
+        fav = next((f for f in favs if f.id == event.favorite_id), None)
+        if fav:
+            self.database.delete_favorite(event.favorite_id)
+            self._set_status(f"Deleted favorite: {fav.label}")
+            self._refresh_sidebar()
+
+    def action_create_group(self):
+        self.push_screen(CreateGroupDialog(), self._on_create_group_result)
+
+    def _on_create_group_result(self, name: str | None):
+        if name:
+            from .models import Group
+            group = Group(name=name)
+            self.database.upsert_group(group)
+            self._set_status(f"Created group: {name}")
+            self._refresh_sidebar()
+
+    def action_add_to_group(self):
+        browser = self.query_one("#sidebar", GroupBrowser)
+        fav_id = browser.get_selected_favorite_id()
+        if fav_id is None:
+            self._set_status("Select a favorite first")
+            return
+        groups = self.database.list_groups()
+        if not groups:
+            self._set_status("No groups yet — create one with Ctrl+T")
+            return
+        fav = next((f for f in self.database.list_favorites() if f.id == fav_id), None)
+        label = fav.label if fav else str(fav_id)
+        self.push_screen(
+            AddToGroupDialog(groups, fav_label=label),
+            lambda group_id: self._do_add_to_group(fav_id, group_id),
+        )
+
+    def _do_add_to_group(self, fav_id: int, group_id: int | None):
+        if group_id is not None:
+            # Get existing favorites in the group and append this one
+            existing = self.database.get_group_favorites(group_id)
+            existing_ids = [f.id for f in existing]
+            if fav_id not in existing_ids:
+                existing_ids.append(fav_id)
+                self.database.set_group_favorites(group_id, existing_ids)
+            groups = self.database.list_groups()
+            group = next((g for g in groups if g.id == group_id), None)
+            group_name = group.name if group else str(group_id)
+            self._set_status(f"Added to group: {group_name}")
+            self._refresh_sidebar()
 
     # -- Widget Messages --
 

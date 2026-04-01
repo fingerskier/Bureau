@@ -27,6 +27,15 @@ python -m pip install pywin32
 python -m termdash
 ```
 
+## Build Executable
+
+```bash
+python -m pip install -e ".[build]"
+python build.py
+```
+
+Output: `dist/termdash.exe` (single-file)
+
 ## Keybindings
 
 | Key | Action |
@@ -36,6 +45,9 @@ python -m termdash
 | `Ctrl+F` | Focus (bring to foreground) |
 | `Ctrl+I` | Inject text into terminal |
 | `Ctrl+S` | Save session as favorite |
+| `Ctrl+D` | Delete selected favorite |
+| `Ctrl+T` | Create a new group |
+| `Ctrl+A` | Add favorite to group |
 | `Ctrl+G` | Launch a group |
 | `Ctrl+L` | Capture window layout |
 | `/` | Filter sessions |

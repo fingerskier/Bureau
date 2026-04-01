@@ -160,3 +160,62 @@ class InjectDialog(ModalScreen[str | None]):
 
     def action_cancel(self):
         self.dismiss(None)
+
+
+class CreateGroupDialog(ModalScreen[str | None]):
+    """Prompt for a name to create a new group."""
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+    CSS = """
+    CreateGroupDialog { align: center middle; }
+    #create-group-dialog {
+        width: 50; height: auto; border: thick $accent;
+        background: $surface; padding: 1 2;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="create-group-dialog"):
+            yield Label("Create Group")
+            yield Label("Name:")
+            yield Input(placeholder="e.g. Dev Servers", id="group-name")
+
+    def on_input_submitted(self, event: Input.Submitted):
+        self.dismiss(event.value or None)
+
+    def action_cancel(self):
+        self.dismiss(None)
+
+
+class AddToGroupDialog(ModalScreen[int | None]):
+    """Pick a group to add a favorite to."""
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+    CSS = """
+    AddToGroupDialog { align: center middle; }
+    #add-to-group {
+        width: 50; height: auto; max-height: 20;
+        border: thick $accent; background: $surface; padding: 1 2;
+    }
+    """
+
+    def __init__(self, groups: list[Group], fav_label: str = ""):
+        super().__init__()
+        self.groups = groups
+        self.fav_label = fav_label
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="add-to-group"):
+            yield Label(f"Add '{self.fav_label}' to group:")
+            yield OptionList(
+                *[Option(g.name, id=str(g.id)) for g in self.groups],
+                id="group-select",
+            )
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected):
+        self.dismiss(int(event.option.id))
+
+    def action_cancel(self):
+        self.dismiss(None)

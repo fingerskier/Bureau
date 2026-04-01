@@ -51,6 +51,21 @@ class GroupBrowser(Vertical):
         for group in groups:
             group_list.append(ListItem(Label(f"# {group.name}"), id=f"grp-{group.id}-{seq}"))
 
+    def get_selected_favorite_id(self) -> int | None:
+        """Return the favorite ID of the highlighted sidebar item, or None."""
+        fav_list = self.query_one("#fav-list", ListView)
+        if fav_list.highlighted_child is not None:
+            item_id = fav_list.highlighted_child.id or ""
+            if item_id.startswith("fav-"):
+                return int(item_id.split("-")[1])
+        return None
+
+    def request_delete_selected(self):
+        """Post a delete request for the currently highlighted favorite."""
+        fav_id = self.get_selected_favorite_id()
+        if fav_id is not None:
+            self.post_message(self.FavoriteDeleteRequested(fav_id))
+
     def on_list_view_selected(self, event: ListView.Selected):
         item_id = event.item.id or ""
         if item_id.startswith("fav-"):

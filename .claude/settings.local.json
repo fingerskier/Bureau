@@ -13,7 +13,11 @@
       "Bash(python -c \"from termdash.platform.windows import WindowsDriver, _ensure_win32; w = _ensure_win32\\(\\); print\\(f'win32 loaded: {w is not None}'\\)\")",
       "Bash(python:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(tasklist)",
+      "Bash(taskkill:*)",
+      "mcp__plugin_context7_context7__resolve-library-id",
+      "mcp__plugin_context7_context7__query-docs"
     ]
   }
 }

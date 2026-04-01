@@ -120,20 +120,8 @@ class Manager:
             if session.window_handle:
                 session.window_title = self.driver.get_window_title(session.window_handle)
 
-            # Capture screen content and hash for visual idle detection
-            if session.window_handle:
-                content = self.driver.read_screen(session.window_handle, pid)
-                if content:
-                    session.screen_content = content
-                    # Hash last ~20 lines for staleness detection
-                    tail = "\n".join(content.splitlines()[-20:])
-                    new_hash = hashlib.md5(tail.encode()).hexdigest()
-                    if new_hash == session._screen_hash:
-                        session._screen_idle_count += 1
-                    else:
-                        session._screen_idle_count = 0
-                    session._screen_hash = new_hash
-                    session.visually_idle = session._screen_idle_count >= 3
+            # Screen capture moved to analyze_sessions() — runs in background
+            # thread to avoid FreeConsole/AttachConsole disrupting Textual
 
         # Remove dead sessions from tracking
         for pid in dead_pids:
@@ -178,8 +166,30 @@ class Manager:
         return list(self.sessions.values())
 
     def analyze_sessions(self):
-        """Run Claude Haiku analysis on sessions with fresh screen content."""
+        """Capture screen content, update hashes, and run Haiku analysis.
+
+        Called from a background worker thread — safe to use
+        FreeConsole/AttachConsole here without disrupting Textual.
+        """
         for session in self.get_live_sessions():
+            # Screen capture (safe in background thread)
+            if session.window_handle:
+                try:
+                    content = self.driver.read_screen(session.window_handle, session.pid)
+                except Exception:
+                    content = None
+                if content:
+                    session.screen_content = content
+                    tail = "\n".join(content.splitlines()[-20:])
+                    new_hash = hashlib.md5(tail.encode()).hexdigest()
+                    if new_hash == session._screen_hash:
+                        session._screen_idle_count += 1
+                    else:
+                        session._screen_idle_count = 0
+                    session._screen_hash = new_hash
+                    session.visually_idle = session._screen_idle_count >= 3
+
+            # Haiku analysis (skip if visually idle or no content)
             if session.visually_idle or not session.screen_content:
                 continue
             result = analyze_screen(session.screen_content)
