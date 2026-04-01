@@ -172,3 +172,17 @@ class MacOSDriver(TerminalDriver):
             return True
         except Exception:
             return False
+
+    def read_screen(self, window_handle: int, pid: int, lines: int = 50) -> str | None:
+        """Read Terminal.app window content via AppleScript."""
+        try:
+            content = self._osascript(
+                'tell application "Terminal" to get contents of selected tab of front window'
+            )
+            if not content:
+                return None
+            # Return last N lines
+            all_lines = content.splitlines()
+            return "\n".join(all_lines[-lines:])
+        except Exception:
+            return None
