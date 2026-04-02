@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import shlex
+import time
 from typing import Optional
 
 import psutil
@@ -24,11 +25,14 @@ class MacOSDriver(TerminalDriver):
 
     def _osascript(self, script: str) -> str:
         """Run AppleScript and return stdout."""
-        result = subprocess.run(
-            ["osascript", "-e", script],
-            capture_output=True, text=True, timeout=5,
-        )
-        return result.stdout.strip()
+        try:
+            result = subprocess.run(
+                ["osascript", "-e", script],
+                capture_output=True, text=True, timeout=5,
+            )
+            return result.stdout.strip()
+        except subprocess.TimeoutExpired:
+            return ""
 
     def spawn(
         self,
@@ -63,10 +67,9 @@ class MacOSDriver(TerminalDriver):
                         do script ""
                     end tell
                 '''
+            before = self._child_shell_pids("Terminal")
             self._osascript(script)
-
-            # Get the PID of the most recent Terminal process
-            pid = self._get_latest_terminal_pid()
+            pid = self._await_new_shell(before, "Terminal")
             return pid or 0, None
 
         elif shell_type == ShellType.ITERM:
@@ -82,8 +85,9 @@ class MacOSDriver(TerminalDriver):
                     end tell
                 end tell
             '''
+            before = self._child_shell_pids("iTerm2")
             self._osascript(script)
-            pid = self._get_latest_terminal_pid("iTerm2")
+            pid = self._await_new_shell(before, "iTerm2")
             return pid or 0, None
 
         else:
@@ -92,14 +96,28 @@ class MacOSDriver(TerminalDriver):
             proc = subprocess.Popen(cmd, cwd=working_dir or None)
             return proc.pid, None
 
-    def _get_latest_terminal_pid(self, app_name: str = "Terminal") -> Optional[int]:
-        """Find the PID of the most recently spawned Terminal/iTerm process."""
-        for proc in psutil.process_iter(["name", "create_time"]):
+    def _child_shell_pids(self, app_name: str) -> set[int]:
+        """Get PIDs of shell processes that are children of a terminal app."""
+        for proc in psutil.process_iter(["name", "pid"]):
             try:
                 if app_name.lower() in proc.info["name"].lower():
-                    return proc.pid
+                    parent = psutil.Process(proc.info["pid"])
+                    return {
+                        c.pid for c in parent.children(recursive=True)
+                        if c.name().lower() in ("bash", "zsh", "sh", "fish")
+                    }
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
+        return set()
+
+    def _await_new_shell(self, before: set[int], app_name: str) -> Optional[int]:
+        """Wait for a new shell process to appear under a terminal app."""
+        for _ in range(10):
+            time.sleep(0.2)
+            after = self._child_shell_pids(app_name)
+            new = after - before
+            if new:
+                return max(new)
         return None
 
     def is_alive(self, pid: int) -> bool:
@@ -147,10 +165,10 @@ class MacOSDriver(TerminalDriver):
         return None
 
     def get_screen_size(self) -> tuple[int, int]:
-        result = self._osascript(
-            'tell application "Finder" to get bounds of window of desktop'
-        )
         try:
+            result = self._osascript(
+                'tell application "Finder" to get bounds of window of desktop'
+            )
             parts = [int(x.strip()) for x in result.split(",")]
             return parts[2], parts[3]
         except Exception:

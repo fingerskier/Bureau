@@ -21,7 +21,8 @@
       "Bash(dist/termdash.exe --help)",
       "Bash(dist/termdash.exe)",
       "Bash(grep -E \"\\\\.\\(py|txt|md|cfg\\)$\")",
-      "Bash(git show:*)"
+      "Bash(git show:*)",
+      "Bash(python3:*)"
     ]
   }
 }
