@@ -75,7 +75,7 @@ class TermDashApp(App):
         Binding("ctrl+i", "inject", "Inject Text", priority=True),
         Binding("ctrl+d", "delete_favorite", "Delete Favorite", priority=True),
         Binding("ctrl+l", "capture_layout", "Capture Layout", priority=True),
-        Binding("slash", "filter", "Filter", priority=True),
+        Binding("slash", "filter", "Filter", priority=False),
         Binding("escape", "unfocus_filter", "Back to Table", priority=False),
         Binding("ctrl+r", "refresh", "Refresh", priority=True),
         Binding("ctrl+q", "quit", "Quit", priority=True),

@@ -1,6 +1,9 @@
 """Entry point for `python -m termdash`."""
 
-from .app import TermDashApp
+try:
+    from .app import TermDashApp
+except ImportError:
+    from termdash.app import TermDashApp
 
 
 def main():

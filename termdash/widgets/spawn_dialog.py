@@ -6,7 +6,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Input, Label, OptionList
+from textual.widgets import Button, Input, Label, OptionList
 from textual.widgets.option_list import Option
 
 from ..models import Favorite, Group, ShellType
@@ -17,6 +17,7 @@ class SpawnDialog(ModalScreen[Favorite | None]):
 
     BINDINGS = [
         Binding("escape", "cancel", "Cancel"),
+        Binding("enter", "submit", "Submit", priority=False),
     ]
 
     CSS = """
@@ -37,6 +38,10 @@ class SpawnDialog(ModalScreen[Favorite | None]):
     #spawn-dialog Input {
         margin-bottom: 1;
     }
+    #spawn-dialog Button {
+        margin-top: 1;
+        width: 100%;
+    }
     """
 
     def compose(self) -> ComposeResult:
@@ -51,12 +56,17 @@ class SpawnDialog(ModalScreen[Favorite | None]):
             yield Label("Label:")
             yield Input(placeholder="optional label", id="input-label")
             yield Label("Working Directory:")
-            yield Input(placeholder="e.g. C:\\Projects\\myapp", id="input-cwd")
+            yield Input(placeholder="e.g. ~/Projects/myapp", id="input-cwd")
             yield Label("Startup Commands (one per line):")
             yield Input(placeholder="e.g. npm run dev", id="input-commands")
+            yield Button("Spawn", variant="primary", id="btn-spawn")
 
-    def on_option_list_option_selected(self, event: OptionList.OptionSelected):
-        shell = ShellType(event.option.id)
+    def _gather_and_dismiss(self) -> None:
+        option_list = self.query_one("#shell-select", OptionList)
+        idx = option_list.highlighted
+        shells = ShellType.defaults_for_platform()
+        shell = shells[idx] if idx is not None else shells[0]
+
         label = self.query_one("#input-label", Input).value
         cwd = self.query_one("#input-cwd", Input).value
         cmds_raw = self.query_one("#input-commands", Input).value
@@ -69,6 +79,16 @@ class SpawnDialog(ModalScreen[Favorite | None]):
             startup_commands=commands,
         )
         self.dismiss(fav)
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected):
+        self._gather_and_dismiss()
+
+    def on_button_pressed(self, event: Button.Pressed):
+        if event.button.id == "btn-spawn":
+            self._gather_and_dismiss()
+
+    def action_submit(self):
+        self._gather_and_dismiss()
 
     def action_cancel(self):
         self.dismiss(None)

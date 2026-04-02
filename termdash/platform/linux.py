@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -43,7 +44,7 @@ class LinuxDriver(TerminalDriver):
         ]
 
         shell = self.shell_executable(shell_type)
-        cwd = working_dir or None
+        cwd = os.path.expanduser(working_dir) if working_dir else None
 
         # Create a log file for output capture
         log_file = self._log_dir / f"termdash_{id(self)}_{len(self._pid_logs)}.log"
