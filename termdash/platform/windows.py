@@ -253,61 +253,72 @@ class WindowsDriver(TerminalDriver):
         except Exception:
             return False
 
-    def read_screen(self, window_handle: int, pid: int, lines: int = 50) -> str | None:
-        """Read the console screen buffer of a terminal process via ctypes."""
-        kernel32 = ctypes.windll.kernel32
-        STD_OUTPUT_HANDLE = -11
+    # Inline script for subprocess-based console reading.
+    # Runs in an isolated process to avoid FreeConsole/AttachConsole
+    # disrupting Textual's console I/O on the main process.
+    _READ_SCREEN_SCRIPT = r'''
+import ctypes, sys
+from ctypes import wintypes
 
-        # Save our own console state, then attach to target
-        had_console = kernel32.FreeConsole()
-        if not kernel32.AttachConsole(pid):
-            # Re-attach to our own console
-            if had_console:
-                kernel32.AttachConsole(-1)  # ATTACH_PARENT_PROCESS
-            return None
+pid, lines = int(sys.argv[1]), int(sys.argv[2])
+kernel32 = ctypes.windll.kernel32
+
+kernel32.FreeConsole()
+if not kernel32.AttachConsole(pid):
+    sys.exit(1)
+try:
+    h = kernel32.CreateFileW("CONOUT$", 0x80000000, 2, None, 3, 0, None)
+    if h == -1:
+        sys.exit(1)
+
+    class CSBI(ctypes.Structure):
+        _fields_ = [
+            ("dwSize", wintypes._COORD),
+            ("dwCursorPosition", wintypes._COORD),
+            ("wAttributes", wintypes.WORD),
+            ("srWindow", wintypes.SMALL_RECT),
+            ("dwMaximumWindowSize", wintypes._COORD),
+        ]
+
+    csbi = CSBI()
+    if not kernel32.GetConsoleScreenBufferInfo(h, ctypes.byref(csbi)):
+        sys.exit(1)
+
+    w = csbi.dwSize.X
+    end = csbi.dwCursorPosition.Y
+    start = max(0, end - lines + 1)
+    total = w * (end - start + 1)
+    buf = ctypes.create_unicode_buffer(total)
+    coord = wintypes._COORD(0, start)
+    read = wintypes.DWORD()
+    kernel32.ReadConsoleOutputCharacterW(h, buf, total, coord, ctypes.byref(read))
+    kernel32.CloseHandle(h)
+
+    raw = buf.value
+    for i in range(end - start + 1):
+        print(raw[i * w:(i + 1) * w].rstrip())
+finally:
+    kernel32.FreeConsole()
+'''
+
+    def read_screen(self, window_handle: int, pid: int, lines: int = 50) -> str | None:
+        """Read console buffer via isolated subprocess (avoids disrupting Textual)."""
+        import subprocess
+        import sys
+
+        python = sys.executable
+        # For frozen (PyInstaller) builds, sys.executable is the .exe not Python
+        if getattr(sys, 'frozen', False):
+            python = 'python'
 
         try:
-            handle = kernel32.GetStdHandle(STD_OUTPUT_HANDLE)
-            if handle == -1:
-                return None
-
-            class CONSOLE_SCREEN_BUFFER_INFO(ctypes.Structure):
-                _fields_ = [
-                    ("dwSize", wintypes._COORD),
-                    ("dwCursorPosition", wintypes._COORD),
-                    ("wAttributes", wintypes.WORD),
-                    ("srWindow", wintypes.SMALL_RECT),
-                    ("dwMaximumWindowSize", wintypes._COORD),
-                ]
-
-            csbi = CONSOLE_SCREEN_BUFFER_INFO()
-            if not kernel32.GetConsoleScreenBufferInfo(handle, ctypes.byref(csbi)):
-                return None
-
-            width = csbi.dwSize.X
-            # Read from cursor position backwards, up to `lines` lines
-            end_row = csbi.dwCursorPosition.Y
-            start_row = max(0, end_row - lines + 1)
-            total_chars = width * (end_row - start_row + 1)
-
-            buf = ctypes.create_unicode_buffer(total_chars)
-            coord = wintypes._COORD(0, start_row)
-            chars_read = wintypes.DWORD()
-            kernel32.ReadConsoleOutputCharacterW(
-                handle, buf, total_chars, coord, ctypes.byref(chars_read)
+            result = subprocess.run(
+                [python, '-c', self._READ_SCREEN_SCRIPT, str(pid), str(lines)],
+                capture_output=True, text=True, timeout=5,
+                creationflags=subprocess.CREATE_NO_WINDOW,
             )
-
-            # Split into lines and strip trailing whitespace
-            raw = buf.value
-            result_lines = []
-            for i in range(end_row - start_row + 1):
-                line = raw[i * width:(i + 1) * width].rstrip()
-                result_lines.append(line)
-
-            return "\n".join(result_lines)
-        except Exception:
-            return None
-        finally:
-            kernel32.FreeConsole()
-            # Re-attach to parent console (Textual manages its own I/O)
-            kernel32.AttachConsole(-1)
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.rstrip('\n')
+        except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+            pass
+        return None
