@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import hashlib
+import threading
 from typing import Optional
 
 import psutil
@@ -22,6 +23,7 @@ class Manager:
         self.db = db
         self.driver = driver
         self.sessions: dict[int, Session] = {}  # pid -> Session
+        self._lock = threading.Lock()  # guards self.sessions
 
     # --- Lifecycle ---
 
@@ -44,7 +46,8 @@ class Manager:
             status=SessionStatus.ALIVE,
         )
         session = self.db.save_session(session)
-        self.sessions[pid] = session
+        with self._lock:
+            self.sessions[pid] = session
         return session
 
     def spawn_quick(self, shell_type, working_dir: str = "", label: str = "") -> Session:
@@ -65,15 +68,17 @@ class Manager:
             status=SessionStatus.ALIVE,
         )
         session = self.db.save_session(session)
-        self.sessions[pid] = session
+        with self._lock:
+            self.sessions[pid] = session
         return session
 
     def kill_session(self, pid: int) -> bool:
         success = self.driver.kill(pid)
-        if pid in self.sessions:
-            self.sessions[pid].status = SessionStatus.DEAD
-            self.db.save_session(self.sessions[pid])
-            del self.sessions[pid]
+        with self._lock:
+            session = self.sessions.pop(pid, None)
+        if session:
+            session.status = SessionStatus.DEAD
+            self.db.save_session(session)
         return success
 
     # --- Health ---
@@ -85,8 +90,11 @@ class Manager:
 
     def refresh_all(self):
         """Poll all tracked sessions for liveness and resource usage."""
+        with self._lock:
+            snapshot = list(self.sessions.items())
+
         dead_pids = []
-        for pid, session in self.sessions.items():
+        for pid, session in snapshot:
             if not self.driver.is_alive(pid):
                 session.status = SessionStatus.DEAD
                 session.activity = ActivityState.UNKNOWN
@@ -124,8 +132,10 @@ class Manager:
             # thread to avoid FreeConsole/AttachConsole disrupting Textual
 
         # Remove dead sessions from tracking
-        for pid in dead_pids:
-            del self.sessions[pid]
+        if dead_pids:
+            with self._lock:
+                for pid in dead_pids:
+                    self.sessions.pop(pid, None)
 
     def _classify_activity(self, session: Session) -> ActivityState:
         """Classify activity using analysis > screen hash > CPU heuristic."""
@@ -160,10 +170,12 @@ class Manager:
         return ActivityState.WAITING
 
     def get_live_sessions(self) -> list[Session]:
-        return [s for s in self.sessions.values() if s.status == SessionStatus.ALIVE]
+        with self._lock:
+            return [s for s in self.sessions.values() if s.status == SessionStatus.ALIVE]
 
     def get_all_sessions(self) -> list[Session]:
-        return list(self.sessions.values())
+        with self._lock:
+            return list(self.sessions.values())
 
     def analyze_sessions(self):
         """Capture screen content, update hashes, and run Haiku analysis.
@@ -171,6 +183,7 @@ class Manager:
         Called from a background worker thread — safe to use
         FreeConsole/AttachConsole here without disrupting Textual.
         """
+        # Snapshot live sessions under lock; iterate outside lock
         for session in self.get_live_sessions():
             # Screen capture (safe in background thread)
             if session.window_handle:
@@ -239,7 +252,8 @@ class Manager:
                     session.window_handle = hwnd
                 session.status = SessionStatus.ALIVE
                 self.db.save_session(session)
-                self.sessions[session.pid] = session
+                with self._lock:
+                    self.sessions[session.pid] = session
                 reconnected += 1
             else:
                 session.status = SessionStatus.DEAD

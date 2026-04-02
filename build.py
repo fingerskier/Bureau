@@ -12,6 +12,8 @@ def main():
         "--console",
         # Collect Textual's bundled CSS and data files
         "--collect-data", "textual",
+        # Collect Rich submodules (unicode data loaded dynamically via importlib)
+        "--collect-submodules", "rich",
         # Hidden imports that PyInstaller misses
         "--hidden-import", "textual.widgets",
         "--hidden-import", "textual.css",

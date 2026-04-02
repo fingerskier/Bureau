@@ -132,7 +132,12 @@ class TermDashApp(App):
     # -- Table --
 
     def _refresh_table(self):
+        """Full refresh: poll I/O + UI update (for synchronous callers)."""
         self.manager.refresh_all()
+        self._refresh_table_ui()
+
+    def _refresh_table_ui(self):
+        """UI-only refresh: read cached session state and update widgets."""
         sessions = self.manager.get_all_sessions()
 
         # Apply filter
@@ -152,11 +157,17 @@ class TermDashApp(App):
         self.session_count = len(self.manager.get_live_sessions())
 
     def _poll_sessions(self):
-        self._refresh_table()
+        """Poll sessions in a background thread to avoid blocking the TUI."""
+        self.run_worker(self._run_poll, thread=True, exclusive=True, group="poll")
+
+    def _run_poll(self):
+        """Worker thread: blocking I/O for session health checks."""
+        self.manager.refresh_all()
+        self.call_from_thread(self._refresh_table_ui)
 
     def _analyze_sessions(self):
         """Run Claude Haiku analysis on active sessions (background)."""
-        self.run_worker(self._run_analysis, thread=True)
+        self.run_worker(self._run_analysis, thread=True, exclusive=True, group="analysis")
 
     def _run_analysis(self):
         """Worker thread for Haiku analysis (subprocess calls block)."""
@@ -175,24 +186,40 @@ class TermDashApp(App):
 
     def _on_spawn_result(self, result: Favorite | None):
         if result:
+            self._set_status(f"Spawning {result.label}...")
+            self.run_worker(lambda: self._do_spawn(result), thread=True)
+
+    def _do_spawn(self, fav: Favorite):
+        """Worker thread: blocking spawn + optional kill/respawn."""
+        if fav.startup_commands:
             session = self.manager.spawn_quick(
-                shell_type=result.shell_type,
-                working_dir=result.working_dir,
-                label=result.label,
+                shell_type=fav.shell_type,
+                working_dir=fav.working_dir,
+                label=fav.label,
             )
-            if result.startup_commands:
-                self.manager.kill_session(session.pid)
-                session = self.manager.spawn_from_favorite(result)
-            self._set_status(f"Spawned {result.label} (PID {session.pid})")
-            self._refresh_table()
+            self.manager.kill_session(session.pid)
+            session = self.manager.spawn_from_favorite(fav)
+        else:
+            session = self.manager.spawn_quick(
+                shell_type=fav.shell_type,
+                working_dir=fav.working_dir,
+                label=fav.label,
+            )
+        self.call_from_thread(self._set_status, f"Spawned {fav.label} (PID {session.pid})")
+        self.call_from_thread(self._refresh_table_ui)
 
     def action_kill(self):
         table = self.query_one("#session-table", SessionTable)
         pid = table.get_selected_pid()
         if pid is not None:
-            self.manager.kill_session(pid)
-            self._set_status(f"Killed PID {pid}")
-            self._refresh_table()
+            self._set_status(f"Killing PID {pid}...")
+            self.run_worker(lambda: self._do_kill(pid), thread=True)
+
+    def _do_kill(self, pid: int):
+        """Worker thread: kill session (may block up to 3s on wait)."""
+        self.manager.kill_session(pid)
+        self.call_from_thread(self._set_status, f"Killed PID {pid}")
+        self.call_from_thread(self._refresh_table_ui)
 
     def action_focus_term(self):
         table = self.query_one("#session-table", SessionTable)
@@ -248,9 +275,17 @@ class TermDashApp(App):
         groups = self.database.list_groups()
         group = next((g for g in groups if g.id == group_id), None)
         if group:
-            sessions = self.manager.launch_group(group)
-            self._set_status(f"Launched group '{group.name}' ({len(sessions)} terminals)")
-            self._refresh_table()
+            self._set_status(f"Launching group '{group.name}'...")
+            self.run_worker(lambda: self._do_launch_group_worker(group), thread=True)
+
+    def _do_launch_group_worker(self, group):
+        """Worker thread: spawn all favorites in a group."""
+        sessions = self.manager.launch_group(group)
+        self.call_from_thread(
+            self._set_status,
+            f"Launched group '{group.name}' ({len(sessions)} terminals)",
+        )
+        self.call_from_thread(self._refresh_table_ui)
 
     def action_inject(self):
         table = self.query_one("#session-table", SessionTable)
@@ -279,9 +314,15 @@ class TermDashApp(App):
             self._set_status(f"Captured layout: {layout.name}")
 
     def action_refresh(self):
-        self._refresh_table()
+        self._set_status("Refreshing...")
         self._refresh_sidebar()
-        self._set_status("Refreshed")
+        self.run_worker(self._run_refresh, thread=True)
+
+    def _run_refresh(self):
+        """Worker thread: manual refresh."""
+        self.manager.refresh_all()
+        self.call_from_thread(self._refresh_table_ui)
+        self.call_from_thread(self._set_status, "Refreshed")
 
     # -- Config Export/Import --
 
@@ -397,9 +438,14 @@ class TermDashApp(App):
         favs = self.database.list_favorites()
         fav = next((f for f in favs if f.id == event.favorite_id), None)
         if fav:
-            session = self.manager.spawn_from_favorite(fav)
-            self._set_status(f"Launched '{fav.label}' (PID {session.pid})")
-            self._refresh_table()
+            self._set_status(f"Launching '{fav.label}'...")
+            self.run_worker(lambda: self._do_launch_favorite(fav), thread=True)
+
+    def _do_launch_favorite(self, fav: Favorite):
+        """Worker thread: spawn from favorite."""
+        session = self.manager.spawn_from_favorite(fav)
+        self.call_from_thread(self._set_status, f"Launched '{fav.label}' (PID {session.pid})")
+        self.call_from_thread(self._refresh_table_ui)
 
     def on_group_browser_group_selected(self, event: GroupBrowser.GroupSelected):
         self._do_launch_group(event.group_id)

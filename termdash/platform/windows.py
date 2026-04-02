@@ -181,11 +181,21 @@ class WindowsDriver(TerminalDriver):
             return False
 
     def get_window_title(self, window_handle: int) -> str:
-        w = _ensure_win32()
-        if not w:
-            return ""
+        """Get window title with timeout to avoid blocking on hung windows."""
         try:
-            return w.gui.GetWindowText(window_handle)
+            import ctypes
+            from ctypes import wintypes
+            buf = ctypes.create_unicode_buffer(256)
+            SMTO_ABORTIFHUNG = 0x0002
+            WM_GETTEXT = 0x000D
+            lpdw_result = wintypes.DWORD()
+            ret = ctypes.windll.user32.SendMessageTimeoutW(
+                window_handle, WM_GETTEXT,
+                256, buf,
+                SMTO_ABORTIFHUNG, 100,  # 100ms timeout
+                ctypes.byref(lpdw_result),
+            )
+            return buf.value if ret else ""
         except Exception:
             return ""
 
