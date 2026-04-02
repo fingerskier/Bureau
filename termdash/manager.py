@@ -169,6 +169,10 @@ class Manager:
             return ActivityState.IDLE
         return ActivityState.WAITING
 
+    def get_session(self, pid: int) -> Session | None:
+        with self._lock:
+            return self.sessions.get(pid)
+
     def get_live_sessions(self) -> list[Session]:
         with self._lock:
             return [s for s in self.sessions.values() if s.status == SessionStatus.ALIVE]
@@ -316,14 +320,14 @@ class Manager:
                 self.driver.set_window_rect(session.window_handle, lw.rect)
 
     def focus_session(self, pid: int) -> bool:
-        session = self.sessions.get(pid)
+        session = self.get_session(pid)
         if session and session.window_handle:
             return self.driver.focus_window(session.window_handle)
         return False
 
     def inject_text(self, pid: int, text: str) -> bool:
         """Send text to a running terminal session."""
-        session = self.sessions.get(pid)
+        session = self.get_session(pid)
         if session and session.window_handle and session.status == SessionStatus.ALIVE:
             return self.driver.inject_text(session.window_handle, text)
         return False

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime
 
 from textual.widgets import DataTable
@@ -21,12 +22,28 @@ _ACTIVITY_ICONS = {
 class SessionTable(DataTable):
     """DataTable showing tracked terminal sessions with live status."""
 
+    _last_hash: str = ""
+
     def on_mount(self):
         self.add_columns("PID", "Label", "Shell", "Dir", "Uptime", "Mem", "Activity", "Summary")
         self.cursor_type = "row"
 
     def refresh_sessions(self, sessions: list[Session]):
-        """Clear and repopulate the table, preserving cursor position."""
+        """Clear and repopulate the table, preserving cursor position.
+
+        Skips rebuild if session data hasn't changed since last call.
+        """
+        # Compute a hash of the data that drives the table
+        h = hashlib.md5()
+        for s in sessions:
+            h.update(f"{s.pid}:{s.status.value}:{s.label}:{s.memory_mb:.0f}:{s.activity.value}:{s.window_title}".encode())
+            if s.analysis:
+                h.update(f":{s.analysis.summary}:{s.analysis.has_errors}:{s.analysis.detected_tool}".encode())
+        digest = h.hexdigest()
+        if digest == self._last_hash:
+            return
+        self._last_hash = digest
+
         # Remember selected PID before clearing
         selected_pid = self.get_selected_pid()
         self.clear()

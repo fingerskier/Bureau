@@ -121,7 +121,7 @@ class TermDashApp(App):
     def on_input_changed(self, event: Input.Changed):
         if event.input.id == "filter-input":
             self.filter_text = event.value
-            self._refresh_table()
+            self._refresh_table_ui()
 
     def action_filter(self):
         self.query_one("#filter-input", Input).focus()
@@ -231,7 +231,7 @@ class TermDashApp(App):
         table = self.query_one("#session-table", SessionTable)
         pid = table.get_selected_pid()
         if pid is not None:
-            session = self.manager.sessions.get(pid)
+            session = self.manager.get_session(pid)
             if session:
                 self.push_screen(
                     SaveFavoriteDialog(),
@@ -291,7 +291,7 @@ class TermDashApp(App):
         table = self.query_one("#session-table", SessionTable)
         pid = table.get_selected_pid()
         if pid is not None:
-            session = self.manager.sessions.get(pid)
+            session = self.manager.get_session(pid)
             if session and session.status == SessionStatus.ALIVE:
                 self.push_screen(
                     InjectDialog(session_label=session.label or str(pid)),

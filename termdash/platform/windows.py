@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ctypes
+from ctypes import wintypes
 import os
 import subprocess
 import time
@@ -183,8 +185,6 @@ class WindowsDriver(TerminalDriver):
     def get_window_title(self, window_handle: int) -> str:
         """Get window title with timeout to avoid blocking on hung windows."""
         try:
-            import ctypes
-            from ctypes import wintypes
             buf = ctypes.create_unicode_buffer(256)
             SMTO_ABORTIFHUNG = 0x0002
             WM_GETTEXT = 0x000D
@@ -255,9 +255,6 @@ class WindowsDriver(TerminalDriver):
 
     def read_screen(self, window_handle: int, pid: int, lines: int = 50) -> str | None:
         """Read the console screen buffer of a terminal process via ctypes."""
-        import ctypes
-        from ctypes import wintypes
-
         kernel32 = ctypes.windll.kernel32
         STD_OUTPUT_HANDLE = -11
 
