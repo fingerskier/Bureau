@@ -17,7 +17,10 @@
       "Bash(tasklist)",
       "Bash(taskkill:*)",
       "mcp__plugin_context7_context7__resolve-library-id",
-      "mcp__plugin_context7_context7__query-docs"
+      "mcp__plugin_context7_context7__query-docs",
+      "Bash(dist/termdash.exe --help)",
+      "Bash(dist/termdash.exe)",
+      "Bash(grep -E \"\\\\.\\(py|txt|md|cfg\\)$\")"
     ]
   }
 }
